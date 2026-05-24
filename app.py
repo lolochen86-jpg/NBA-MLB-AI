@@ -598,32 +598,7 @@ def render_saved_results(state_key: str) -> None:
     st.subheader("模擬結果")
     payload = st.session_state.get(state_key)
     if not payload:
-        empty_distribution = pd.DataFrame(
-            {
-                "home_margin": list(range(-10, 11)),
-                "probability": [0.0] * 21,
-                "home_margin_label": [f"{margin:+d}" for margin in range(-10, 11)],
-                "simulations": [0] * 21,
-            }
-        )
-        empty_chart = px.bar(
-            empty_distribution,
-            x="home_margin",
-            y="probability",
-            title="主場得失分分布：等待模擬結果",
-            labels={
-                "home_margin": "主隊分差",
-                "probability": "模擬機率",
-                "home_margin_label": "主隊分差",
-                "simulations": "模擬次數",
-            },
-            hover_data={"home_margin": False, "home_margin_label": True, "probability": ":.2%", "simulations": True},
-        )
-        empty_chart.add_vline(x=0, line_dash="dash", line_color="red")
-        empty_chart.update_yaxes(tickformat=".0%", range=[0, 1])
-        empty_chart.update_traces(marker_color="#cbd5e1")
-        st.plotly_chart(empty_chart, use_container_width=True)
-        st.info("按下「執行模擬」後，首頁這裡會顯示主場得失分分布圖、勝率圖與合理賠率。")
+        st.info("尚未執行模擬。請先選擇主客隊與參數，再按下方的「執行模擬」。")
         return
 
     st.metric(payload["metric_label"], payload["metric_value"])
@@ -665,7 +640,6 @@ def render_nba() -> None:
                 f"{home.team_name} {home.pace:.1f}/{home.off_rating:.1f}/{home.def_rating:.1f}"
             ),
         }
-        st.rerun()
 
 def select_pitcher(label: str, pitching: pd.DataFrame, fg_abbr: str, probable_name: str = "") -> pd.Series:
     rows = pitcher_options(pitching, fg_abbr)
@@ -786,7 +760,6 @@ def render_mlb() -> None:
                 f"{data_source_note}，本季聯盟平均每隊每場得分 {league_runs:.2f}"
             ),
         }
-        st.rerun()
 
 def main() -> None:
     st.set_page_config(
@@ -803,14 +776,14 @@ def main() -> None:
     )
 
     sport = st.segmented_control("運動類型", ["NBA", "MLB"], default="NBA")
-    render_saved_results("nba_results" if sport == "NBA" else "mlb_results")
-    st.divider()
-
     try:
         if sport == "NBA":
             render_nba()
         else:
             render_mlb()
+
+        st.divider()
+        render_saved_results("nba_results" if sport == "NBA" else "mlb_results")
     except Exception as exc:
         st.error(str(exc))
         st.exception(exc)
