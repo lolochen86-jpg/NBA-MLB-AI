@@ -472,22 +472,50 @@ def fetch_mlb_league_runs_per_team_game(season: int) -> float:
     return total_runs / team_games
 
 
-@st.cache_data(ttl=60 * 15)
-def probable_pitchers(team_id_a: int, team_id_b: int, game_date: dt.date) -> dict[str, str]:
+@st.cache_data(ttl=60 * 10)
+def fetch_mlb_schedule_games(game_date: dt.date) -> pd.DataFrame:
     import statsapi
 
-    schedule = statsapi.schedule(
-        date=game_date.strftime("%Y-%m-%d"),
-        sportId=1,
-        team=team_id_a,
+    payload = statsapi.get(
+        "schedule",
+        {
+            "date": game_date.strftime("%Y-%m-%d"),
+            "sportId": 1,
+            "hydrate": "probablePitcher",
+        },
     )
-    for game in schedule:
-        if {int(game.get("home_id", 0)), int(game.get("away_id", 0))} == {int(team_id_a), int(team_id_b)}:
-            return {
-                str(game.get("away_id")): game.get("away_probable_pitcher", ""),
-                str(game.get("home_id")): game.get("home_probable_pitcher", ""),
-            }
-    return {}
+    rows = []
+    for date_block in payload.get("dates", []):
+        for game in date_block.get("games", []):
+            teams = game.get("teams", {})
+            away = teams.get("away", {})
+            home = teams.get("home", {})
+            away_team = away.get("team", {})
+            home_team = home.get("team", {})
+            away_name = away_team.get("name", "")
+            home_name = home_team.get("name", "")
+            away_probable = away.get("probablePitcher", {}).get("fullName", "")
+            home_probable = home.get("probablePitcher", {}).get("fullName", "")
+            status = game.get("status", {}).get("detailedState", "")
+            game_number = int(game.get("gameNumber", 1) or 1)
+            suffix = f" G{game_number}" if game_number > 1 else ""
+            rows.append(
+                {
+                    "game_pk": int(game.get("gamePk", 0)),
+                    "away_id": int(away_team.get("id", 0)),
+                    "home_id": int(home_team.get("id", 0)),
+                    "away_name": away_name,
+                    "home_name": home_name,
+                    "away_probable": away_probable,
+                    "home_probable": home_probable,
+                    "status": status,
+                    "display_name": (
+                        f"{zh_name(away_name, MLB_TEAM_ZH)} @ {zh_name(home_name, MLB_TEAM_ZH)}"
+                        f"{suffix} - {status or 'Scheduled'}"
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def make_mlb_profile(
@@ -684,39 +712,34 @@ def official_pitcher_row(pitching: pd.DataFrame, fg_abbr: str, selected_choice: 
 
 def render_mlb() -> None:
     st.subheader("MLB Monte Carlo")
-    season = st.number_input("MLB Season", min_value=2018, max_value=dt.date.today().year, value=current_mlb_season())
-    game_date = st.date_input("比賽日期（用於抓取 probable pitchers）", value=dt.date.today())
+    game_date = st.date_input("比賽日期", value=dt.date.today())
+    season = current_mlb_season(game_date)
+    st.caption(f"MLB Season：{season}")
 
     teams = mlb_team_options()
-    away_display = st.selectbox("客隊", teams["display_name"], index=0, key="mlb_away")
-    home_display = st.selectbox("主隊", teams["display_name"], index=1, key="mlb_home")
-    away_row = teams.loc[teams["display_name"] == away_display].iloc[0]
-    home_row = teams.loc[teams["display_name"] == home_display].iloc[0]
+    schedule_games = fetch_mlb_schedule_games(game_date)
+    if schedule_games.empty:
+        st.warning("這個日期沒有 MLB 官方賽程，請改選其他日期。")
+        return
 
-    probable: dict[str, str] = {}
-    try:
-        probable = probable_pitchers(int(away_row["id"]), int(home_row["id"]), game_date)
-    except Exception as exc:
-        st.warning(f"暫時抓不到 probable pitchers，仍可用球隊 ERA 模擬：{exc}")
+    selected_game = st.selectbox("選擇賽程對戰", schedule_games["display_name"], key="mlb_game")
+    game_row = schedule_games.loc[schedule_games["display_name"] == selected_game].iloc[0]
+    away_row = teams.loc[teams["id"].astype(int) == int(game_row["away_id"])]
+    home_row = teams.loc[teams["id"].astype(int) == int(game_row["home_id"])]
+    if away_row.empty or home_row.empty:
+        st.error("找不到此賽程對應的 MLB 球隊資料。")
+        return
+    away_row = away_row.iloc[0]
+    home_row = home_row.iloc[0]
+    away_probable = str(game_row.get("away_probable", "") or "")
+    home_probable = str(game_row.get("home_probable", "") or "")
+    away_pitcher_choice = f"{away_probable}（使用球隊 ERA）" if away_probable else "(使用球隊 ERA)"
+    home_pitcher_choice = f"{home_probable}（使用球隊 ERA）" if home_probable else "(使用球隊 ERA)"
 
-    away_probable = probable.get(str(away_row["id"]), "")
-    home_probable = probable.get(str(home_row["id"]), "")
-    if probable:
-        st.caption(
-            "MLB 官方 probable pitchers："
-            f"{zh_name(str(away_row['name']), MLB_TEAM_ZH)} {away_probable or 'N/A'}，"
-            f"{zh_name(str(home_row['name']), MLB_TEAM_ZH)} {home_probable or 'N/A'}"
-        )
-
-    away_pitcher_choice = st.selectbox(
-        f"{zh_name(str(away_row['name']), MLB_TEAM_ZH)} 先發投手",
-        pitcher_choice_options(away_probable),
-        key="mlb_away_pitcher",
-    )
-    home_pitcher_choice = st.selectbox(
-        f"{zh_name(str(home_row['name']), MLB_TEAM_ZH)} 先發投手",
-        pitcher_choice_options(home_probable),
-        key="mlb_home_pitcher",
+    st.caption(
+        "MLB 官方賽程先發："
+        f"{zh_name(str(game_row['away_name']), MLB_TEAM_ZH)} {away_probable or '未公布，使用球隊 ERA'}；"
+        f"{zh_name(str(game_row['home_name']), MLB_TEAM_ZH)} {home_probable or '未公布，使用球隊 ERA'}"
     )
 
     use_fangraphs = st.checkbox(
