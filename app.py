@@ -442,20 +442,29 @@ def fetch_mlb_league_runs_per_team_game(season: int) -> float:
     if end_date < start_date:
         raise RuntimeError("此 MLB season 尚未有可用例行賽比分，請選擇已有完賽資料的球季。")
 
-    games = statsapi.schedule(
-        start_date=start_date.strftime("%Y-%m-%d"),
-        end_date=end_date.strftime("%Y-%m-%d"),
-        sportId=1,
-        gameType="R",
+    schedule_payload = statsapi.get(
+        "schedule",
+        {
+            "startDate": start_date.strftime("%Y-%m-%d"),
+            "endDate": end_date.strftime("%Y-%m-%d"),
+            "sportId": 1,
+            "gameType": "R",
+        },
     )
+    games = [game for date_block in schedule_payload.get("dates", []) for game in date_block.get("games", [])]
     total_runs = 0
     team_games = 0
     for game in games:
-        if "Final" not in str(game.get("status", "")):
+        status = game.get("status", {})
+        detailed_state = status.get("detailedState") if isinstance(status, dict) else str(status)
+        if "Final" not in str(detailed_state):
             continue
-        if game.get("home_score") is None or game.get("away_score") is None:
+        teams = game.get("teams", {})
+        home_score = teams.get("home", {}).get("score", game.get("home_score"))
+        away_score = teams.get("away", {}).get("score", game.get("away_score"))
+        if home_score is None or away_score is None:
             continue
-        total_runs += int(game["home_score"]) + int(game["away_score"])
+        total_runs += int(home_score) + int(away_score)
         team_games += 2
 
     if team_games == 0:
