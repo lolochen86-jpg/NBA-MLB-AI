@@ -176,13 +176,34 @@ def nba_team_options() -> pd.DataFrame:
     return frame
 
 
+def default_nba_season_type(game_date: dt.date) -> str:
+    return "Playoffs" if game_date.month in {4, 5, 6} else "Regular Season"
+
+
+@st.cache_data(ttl=60 * 10)
+def fetch_nba_schedule_games(game_date: dt.date) -> pd.DataFrame:
+    from nba_api.stats.endpoints import scoreboardv2
+
+    endpoint = scoreboardv2.ScoreboardV2(
+        game_date=game_date.strftime("%m/%d/%Y"),
+        league_id="00",
+        day_offset=0,
+        timeout=45,
+    )
+    game_header = endpoint.get_data_frames()[0]
+    if game_header.empty:
+        return pd.DataFrame()
+    require_columns(game_header, ["GAME_ID", "HOME_TEAM_ID", "VISITOR_TEAM_ID"], "nba_api ScoreboardV2")
+    return game_header
+
+
 @st.cache_data(ttl=60 * 30)
-def fetch_nba_advanced_stats(season: str, last_n_games: int) -> pd.DataFrame:
+def fetch_nba_advanced_stats(season: str, season_type: str, last_n_games: int) -> pd.DataFrame:
     from nba_api.stats.endpoints import leaguedashteamstats
 
     endpoint = leaguedashteamstats.LeagueDashTeamStats(
         season=season,
-        season_type_all_star="Regular Season",
+        season_type_all_star=season_type,
         measure_type_detailed_defense="Advanced",
         per_mode_detailed="Per100Possessions",
         last_n_games=last_n_games,
@@ -646,20 +667,47 @@ def render_saved_results(state_key: str) -> None:
 def render_nba() -> None:
     st.subheader("NBA Monte Carlo")
     teams = nba_team_options()
-    season = st.text_input("NBA Season", value=current_nba_season())
-    last_n_games = st.slider("近期場數", min_value=5, max_value=82, value=15, step=5)
+    game_date = st.date_input("比賽日期", value=dt.date.today(), key="nba_game_date")
+    season = st.text_input("NBA Season", value=current_nba_season(game_date))
+    default_type = default_nba_season_type(game_date)
+    season_type_options = ["Playoffs", "Regular Season"]
+    season_type = st.selectbox(
+        "資料階段",
+        season_type_options,
+        index=season_type_options.index(default_type),
+        key="nba_season_type",
+    )
+    last_n_games = st.slider("近期場數（0 = 此階段全部）", min_value=0, max_value=82, value=0 if season_type == "Playoffs" else 15, step=1)
 
-    away_display = st.selectbox("客隊", teams["display_name"], index=0, key="nba_away")
-    home_display = st.selectbox("主隊", teams["display_name"], index=1, key="nba_home")
-    away_id = int(teams.loc[teams["display_name"] == away_display, "id"].iloc[0])
-    home_id = int(teams.loc[teams["display_name"] == home_display, "id"].iloc[0])
+    schedule_games = fetch_nba_schedule_games(game_date)
+    if schedule_games.empty:
+        st.warning("這個日期沒有 NBA 官方賽程，請改選其他日期。")
+        return
+
+    id_to_name = {int(row["id"]): str(row["full_name"]) for _, row in teams.iterrows()}
+
+    def game_display(row: pd.Series) -> str:
+        away_name = zh_name(id_to_name.get(int(row["VISITOR_TEAM_ID"]), str(row["VISITOR_TEAM_ID"])), NBA_TEAM_ZH)
+        home_name = zh_name(id_to_name.get(int(row["HOME_TEAM_ID"]), str(row["HOME_TEAM_ID"])), NBA_TEAM_ZH)
+        status = row.get("GAME_STATUS_TEXT", "Scheduled")
+        return f"{away_name} @ {home_name} - {status}"
+
+    schedule_games = schedule_games.copy()
+    schedule_games["display_name"] = schedule_games.apply(game_display, axis=1)
+    selected_game = st.selectbox("選擇賽程對戰", schedule_games["display_name"], key="nba_game")
+    game_row = schedule_games.loc[schedule_games["display_name"] == selected_game].iloc[0]
+    away_id = int(game_row["VISITOR_TEAM_ID"])
+    home_id = int(game_row["HOME_TEAM_ID"])
+    away_label = zh_name(id_to_name.get(away_id, str(away_id)), NBA_TEAM_ZH)
+    home_label = zh_name(id_to_name.get(home_id, str(home_id)), NBA_TEAM_ZH)
+    st.caption(f"NBA 官方賽程：{away_label} @ {home_label}，狀態：{game_row.get('GAME_STATUS_TEXT', 'Scheduled')}")
 
     if st.button("執行 NBA 10,000 次模擬", type="primary", use_container_width=True):
         if away_id == home_id:
             st.error("請選擇兩支不同球隊。")
             return
         with st.spinner("抓取 nba_api 進階數據並執行模擬..."):
-            stats = fetch_nba_advanced_stats(season, last_n_games)
+            stats = fetch_nba_advanced_stats(season, season_type, last_n_games)
             away = make_nba_profile(stats, away_id)
             home = make_nba_profile(stats, home_id)
             results = simulate_nba(away, home)
@@ -674,7 +722,8 @@ def render_nba() -> None:
             "metric_value": f"{results['margin_home'].mean():+.2f}",
             "caption": (
                 f"Pace/OffRtg/DefRtg：{away.team_name} {away.pace:.1f}/{away.off_rating:.1f}/{away.def_rating:.1f}，"
-                f"{home.team_name} {home.pace:.1f}/{home.off_rating:.1f}/{home.def_rating:.1f}"
+                f"{home.team_name} {home.pace:.1f}/{home.off_rating:.1f}/{home.def_rating:.1f}。"
+                f"資料階段：{season_type}，近期場數：{'全部' if last_n_games == 0 else last_n_games}"
             ),
         }
 
