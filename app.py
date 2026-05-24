@@ -1,18 +1,120 @@
 from __future__ import annotations
 
 import datetime as dt
-import math
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import requests
 import streamlit as st
 
 
 SIMULATIONS = 10_000
 RNG = np.random.default_rng()
+MLB_STATS_API_BASE = "https://statsapi.mlb.com/api/v1"
+
+
+NBA_TEAM_ZH = {
+    "Atlanta Hawks": "亞特蘭大老鷹",
+    "Boston Celtics": "波士頓塞爾提克",
+    "Brooklyn Nets": "布魯克林籃網",
+    "Charlotte Hornets": "夏洛特黃蜂",
+    "Chicago Bulls": "芝加哥公牛",
+    "Cleveland Cavaliers": "克里夫蘭騎士",
+    "Dallas Mavericks": "達拉斯獨行俠",
+    "Denver Nuggets": "丹佛金塊",
+    "Detroit Pistons": "底特律活塞",
+    "Golden State Warriors": "金州勇士",
+    "Houston Rockets": "休士頓火箭",
+    "Indiana Pacers": "印第安那溜馬",
+    "LA Clippers": "洛杉磯快艇",
+    "Los Angeles Clippers": "洛杉磯快艇",
+    "Los Angeles Lakers": "洛杉磯湖人",
+    "Memphis Grizzlies": "曼菲斯灰熊",
+    "Miami Heat": "邁阿密熱火",
+    "Milwaukee Bucks": "密爾瓦基公鹿",
+    "Minnesota Timberwolves": "明尼蘇達灰狼",
+    "New Orleans Pelicans": "紐奧良鵜鶘",
+    "New York Knicks": "紐約尼克",
+    "Oklahoma City Thunder": "奧克拉荷馬雷霆",
+    "Orlando Magic": "奧蘭多魔術",
+    "Philadelphia 76ers": "費城76人",
+    "Phoenix Suns": "鳳凰城太陽",
+    "Portland Trail Blazers": "波特蘭拓荒者",
+    "Sacramento Kings": "沙加緬度國王",
+    "San Antonio Spurs": "聖安東尼奧馬刺",
+    "Toronto Raptors": "多倫多暴龍",
+    "Utah Jazz": "猶他爵士",
+    "Washington Wizards": "華盛頓巫師",
+    "76ers": "費城76人",
+    "Bucks": "密爾瓦基公鹿",
+    "Bulls": "芝加哥公牛",
+    "Cavaliers": "克里夫蘭騎士",
+    "Celtics": "波士頓塞爾提克",
+    "Clippers": "洛杉磯快艇",
+    "Grizzlies": "曼菲斯灰熊",
+    "Hawks": "亞特蘭大老鷹",
+    "Heat": "邁阿密熱火",
+    "Hornets": "夏洛特黃蜂",
+    "Jazz": "猶他爵士",
+    "Kings": "沙加緬度國王",
+    "Knicks": "紐約尼克",
+    "Lakers": "洛杉磯湖人",
+    "Magic": "奧蘭多魔術",
+    "Mavericks": "達拉斯獨行俠",
+    "Nets": "布魯克林籃網",
+    "Nuggets": "丹佛金塊",
+    "Pacers": "印第安那溜馬",
+    "Pelicans": "紐奧良鵜鶘",
+    "Pistons": "底特律活塞",
+    "Raptors": "多倫多暴龍",
+    "Rockets": "休士頓火箭",
+    "Spurs": "聖安東尼奧馬刺",
+    "Suns": "鳳凰城太陽",
+    "Thunder": "奧克拉荷馬雷霆",
+    "Timberwolves": "明尼蘇達灰狼",
+    "Trail Blazers": "波特蘭拓荒者",
+    "Warriors": "金州勇士",
+    "Wizards": "華盛頓巫師",
+}
+
+
+MLB_TEAM_ZH = {
+    "Arizona Diamondbacks": "亞利桑那響尾蛇",
+    "Athletics": "運動家",
+    "Atlanta Braves": "亞特蘭大勇士",
+    "Baltimore Orioles": "巴爾的摩金鶯",
+    "Boston Red Sox": "波士頓紅襪",
+    "Chicago Cubs": "芝加哥小熊",
+    "Chicago White Sox": "芝加哥白襪",
+    "Cincinnati Reds": "辛辛那提紅人",
+    "Cleveland Guardians": "克里夫蘭守護者",
+    "Colorado Rockies": "科羅拉多洛磯",
+    "Detroit Tigers": "底特律老虎",
+    "Houston Astros": "休士頓太空人",
+    "Kansas City Royals": "堪薩斯市皇家",
+    "Los Angeles Angels": "洛杉磯天使",
+    "Los Angeles Dodgers": "洛杉磯道奇",
+    "Miami Marlins": "邁阿密馬林魚",
+    "Milwaukee Brewers": "密爾瓦基釀酒人",
+    "Minnesota Twins": "明尼蘇達雙城",
+    "New York Mets": "紐約大都會",
+    "New York Yankees": "紐約洋基",
+    "Oakland Athletics": "奧克蘭運動家",
+    "Philadelphia Phillies": "費城費城人",
+    "Pittsburgh Pirates": "匹茲堡海盜",
+    "Sacramento Athletics": "沙加緬度運動家",
+    "San Diego Padres": "聖地牙哥教士",
+    "San Francisco Giants": "舊金山巨人",
+    "Seattle Mariners": "西雅圖水手",
+    "St. Louis Cardinals": "聖路易紅雀",
+    "Tampa Bay Rays": "坦帕灣光芒",
+    "Texas Rangers": "德州遊騎兵",
+    "Toronto Blue Jays": "多倫多藍鳥",
+    "Washington Nationals": "華盛頓國民",
+}
 
 
 @dataclass(frozen=True)
@@ -50,6 +152,15 @@ def decimal_odds(probability: float) -> float:
     return float("inf") if probability <= 0 else 1 / probability
 
 
+def zh_name(name: str, mapping: dict[str, str]) -> str:
+    return mapping.get(str(name), str(name))
+
+
+def display_team_name(name: str, mapping: dict[str, str]) -> str:
+    translated = zh_name(name, mapping)
+    return translated if translated == name else f"{translated} ({name})"
+
+
 def require_columns(frame: pd.DataFrame, required: list[str], source: str) -> None:
     missing = [col for col in required if col not in frame.columns]
     if missing:
@@ -60,7 +171,9 @@ def require_columns(frame: pd.DataFrame, required: list[str], source: str) -> No
 def nba_team_options() -> pd.DataFrame:
     from nba_api.stats.static import teams
 
-    return pd.DataFrame(teams.get_teams()).sort_values("full_name")
+    frame = pd.DataFrame(teams.get_teams()).sort_values("full_name")
+    frame["display_name"] = frame["full_name"].map(lambda name: display_team_name(name, NBA_TEAM_ZH))
+    return frame
 
 
 @st.cache_data(ttl=60 * 30)
@@ -86,7 +199,7 @@ def make_nba_profile(stats: pd.DataFrame, team_id: int) -> NBAProfile:
         raise RuntimeError("找不到此 NBA 球隊的進階數據，請確認 season / last N games 設定。")
     row = row.iloc[0]
     return NBAProfile(
-        team_name=str(row["TEAM_NAME"]),
+        team_name=zh_name(str(row["TEAM_NAME"]), NBA_TEAM_ZH),
         pace=float(row["PACE"]),
         off_rating=float(row["OFF_RATING"]),
         def_rating=float(row["DEF_RATING"]),
@@ -130,6 +243,7 @@ def mlb_team_options() -> pd.DataFrame:
         }
         for team in teams
     )
+    frame["display_name"] = frame["name"].map(lambda name: display_team_name(name, MLB_TEAM_ZH))
     return frame.sort_values("name")
 
 
@@ -149,6 +263,105 @@ def fetch_fangraphs_pitching(season: int) -> pd.DataFrame:
     frame = pitching_stats(season, qual=0)
     require_columns(frame, ["Name", "Team", "ERA"], "pybaseball pitching_stats")
     return frame
+
+
+def numeric_stat(value: Any, default: float | None = None) -> float | None:
+    if value in (None, "", "-.--"):
+        return default
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return default
+
+
+def mlb_api_get(path: str, params: dict[str, Any]) -> dict[str, Any]:
+    response = requests.get(f"{MLB_STATS_API_BASE}/{path.lstrip('/')}", params=params, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def team_stat_splits(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    splits: list[dict[str, Any]] = []
+    for stat_block in payload.get("stats", []):
+        splits.extend(stat_block.get("splits", []))
+    return splits
+
+
+@st.cache_data(ttl=60 * 60)
+def fetch_mlb_official_team_stats(season: int, team_refs: tuple[tuple[int, str], ...]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    team_ids = ",".join(str(team_id) for team_id, _ in team_refs)
+    id_to_abbr = {int(team_id): abbr for team_id, abbr in team_refs}
+
+    def fetch_group(group: str) -> list[dict[str, Any]]:
+        params = {
+            "teamIds": team_ids,
+            "stats": "season",
+            "group": group,
+            "season": int(season),
+            "sportIds": 1,
+            "gameType": "R",
+        }
+        payload = mlb_api_get("teams/stats", params)
+        splits = team_stat_splits(payload)
+        if splits:
+            return splits
+
+        fallback_splits: list[dict[str, Any]] = []
+        for team_id, _ in team_refs:
+            team_payload = mlb_api_get(
+                f"teams/{team_id}/stats",
+                {
+                    "stats": "season",
+                    "group": group,
+                    "season": int(season),
+                    "sportId": 1,
+                    "gameType": "R",
+                },
+            )
+            fallback_splits.extend(team_stat_splits(team_payload))
+        return fallback_splits
+
+    batting_rows = []
+    for split in fetch_group("hitting"):
+        team_id = int(split.get("team", {}).get("id", 0))
+        if team_id not in id_to_abbr:
+            continue
+        stat = split.get("stat", {})
+        ops = numeric_stat(stat.get("ops"))
+        if ops is None:
+            continue
+        batting_rows.append(
+            {
+                "Team": id_to_abbr[team_id],
+                "OPS": ops,
+                "PA": numeric_stat(stat.get("plateAppearances"), 1.0) or 1.0,
+            }
+        )
+
+    pitching_rows = []
+    for split in fetch_group("pitching"):
+        team_id = int(split.get("team", {}).get("id", 0))
+        if team_id not in id_to_abbr:
+            continue
+        stat = split.get("stat", {})
+        era = numeric_stat(stat.get("era"))
+        if era is None:
+            continue
+        pitching_rows.append(
+            {
+                "Team": id_to_abbr[team_id],
+                "Name": "(使用球隊 ERA)",
+                "ERA": era,
+                "IP": numeric_stat(stat.get("inningsPitched"), 0.0) or 0.0,
+                "Source": "MLB 官方團隊ERA",
+            }
+        )
+
+    batting = pd.DataFrame(batting_rows)
+    pitching = pd.DataFrame(pitching_rows)
+    require_columns(batting, ["Team", "OPS"], "MLB 官方 hitting stats")
+    require_columns(pitching, ["Team", "Name", "ERA"], "MLB 官方 pitching stats")
+    return batting, pitching
 
 
 def normalize_abbr(value: Any) -> str:
@@ -171,10 +384,28 @@ def fg_team_abbr(mlb_row: pd.Series) -> str:
     return overrides.get(abbr, abbr)
 
 
+def mlb_abbr_aliases(fg_abbr: str) -> set[str]:
+    aliases = {normalize_abbr(fg_abbr)}
+    reverse_aliases = {
+        "ARI": "AZ",
+        "CHW": "CWS",
+        "KCR": "KC",
+        "LAD": "LA",
+        "OAK": "ATH",
+        "SDP": "SD",
+        "SFG": "SF",
+        "TBR": "TB",
+        "WSN": "WSH",
+    }
+    if normalize_abbr(fg_abbr) in reverse_aliases:
+        aliases.add(reverse_aliases[normalize_abbr(fg_abbr)])
+    return aliases
+
+
 def team_batting_profile(batting: pd.DataFrame, fg_abbr: str) -> tuple[float, float]:
-    team_rows = batting.loc[batting["Team"].map(normalize_abbr) == normalize_abbr(fg_abbr)]
+    team_rows = batting.loc[batting["Team"].map(normalize_abbr).isin(mlb_abbr_aliases(fg_abbr))]
     if team_rows.empty:
-        raise RuntimeError(f"FanGraphs batting_stats 找不到 {fg_abbr} 的打擊數據。")
+        raise RuntimeError(f"找不到 {fg_abbr} 的打擊 OPS 數據。")
     plate_appearances = team_rows.get("PA", pd.Series(np.ones(len(team_rows)), index=team_rows.index))
     team_ops = float(np.average(team_rows["OPS"].astype(float), weights=plate_appearances.astype(float)))
     league_ops = float(np.average(batting["OPS"].astype(float), weights=batting.get("PA", pd.Series(np.ones(len(batting)))).astype(float)))
@@ -182,7 +413,7 @@ def team_batting_profile(batting: pd.DataFrame, fg_abbr: str) -> tuple[float, fl
 
 
 def pitcher_options(pitching: pd.DataFrame, fg_abbr: str) -> pd.DataFrame:
-    rows = pitching.loc[pitching["Team"].map(normalize_abbr) == normalize_abbr(fg_abbr)].copy()
+    rows = pitching.loc[pitching["Team"].map(normalize_abbr).isin(mlb_abbr_aliases(fg_abbr))].copy()
     if rows.empty:
         return pd.DataFrame(columns=pitching.columns)
     innings_col = "IP" if "IP" in rows.columns else None
@@ -260,7 +491,7 @@ def make_mlb_profile(
     team_ops, league_ops = team_batting_profile(batting, fg_abbr)
     era, xfip = pitcher_metric(pitcher_row)
     return MLBProfile(
-        team_name=str(team_row["name"]),
+        team_name=zh_name(str(team_row["name"]), MLB_TEAM_ZH),
         fg_abbr=fg_abbr,
         team_ops=team_ops,
         league_ops=league_ops,
@@ -406,10 +637,10 @@ def render_nba() -> None:
     season = st.text_input("NBA Season", value=current_nba_season())
     last_n_games = st.slider("近期場數", min_value=5, max_value=82, value=15, step=5)
 
-    away_name = st.selectbox("客隊", teams["full_name"], index=0, key="nba_away")
-    home_name = st.selectbox("主隊", teams["full_name"], index=1, key="nba_home")
-    away_id = int(teams.loc[teams["full_name"] == away_name, "id"].iloc[0])
-    home_id = int(teams.loc[teams["full_name"] == home_name, "id"].iloc[0])
+    away_display = st.selectbox("客隊", teams["display_name"], index=0, key="nba_away")
+    home_display = st.selectbox("主隊", teams["display_name"], index=1, key="nba_home")
+    away_id = int(teams.loc[teams["display_name"] == away_display, "id"].iloc[0])
+    home_id = int(teams.loc[teams["display_name"] == home_display, "id"].iloc[0])
 
     if st.button("執行 NBA 10,000 次模擬", type="primary", use_container_width=True):
         if away_id == home_id:
@@ -434,6 +665,7 @@ def render_nba() -> None:
                 f"{home.team_name} {home.pace:.1f}/{home.off_rating:.1f}/{home.def_rating:.1f}"
             ),
         }
+        st.rerun()
 
 def select_pitcher(label: str, pitching: pd.DataFrame, fg_abbr: str, probable_name: str = "") -> pd.Series:
     rows = pitcher_options(pitching, fg_abbr)
@@ -450,49 +682,90 @@ def select_pitcher(label: str, pitching: pd.DataFrame, fg_abbr: str, probable_na
     return rows.loc[rows["Name"].astype(str) == selected].iloc[0]
 
 
+def pitcher_choice_options(probable_name: str = "") -> list[str]:
+    options = ["(使用球隊 ERA)"]
+    if probable_name:
+        options.append(f"{probable_name}（使用球隊 ERA）")
+    return options
+
+
+def official_pitcher_row(pitching: pd.DataFrame, fg_abbr: str, selected_choice: str) -> pd.Series:
+    rows = pitcher_options(pitching, fg_abbr)
+    if rows.empty:
+        raise RuntimeError(f"找不到 {fg_abbr} 的官方投手/團隊 ERA。")
+    row = rows.iloc[0].copy()
+    if selected_choice != "(使用球隊 ERA)":
+        row["Name"] = selected_choice.replace("（使用球隊 ERA）", "")
+    return row
+
+
 def render_mlb() -> None:
     st.subheader("MLB Monte Carlo")
     season = st.number_input("MLB Season", min_value=2018, max_value=dt.date.today().year, value=current_mlb_season())
     game_date = st.date_input("比賽日期（用於抓取 probable pitchers）", value=dt.date.today())
 
     teams = mlb_team_options()
-    away_name = st.selectbox("客隊", teams["name"], index=0, key="mlb_away")
-    home_name = st.selectbox("主隊", teams["name"], index=1, key="mlb_home")
-    away_row = teams.loc[teams["name"] == away_name].iloc[0]
-    home_row = teams.loc[teams["name"] == home_name].iloc[0]
+    away_display = st.selectbox("客隊", teams["display_name"], index=0, key="mlb_away")
+    home_display = st.selectbox("主隊", teams["display_name"], index=1, key="mlb_home")
+    away_row = teams.loc[teams["display_name"] == away_display].iloc[0]
+    home_row = teams.loc[teams["display_name"] == home_display].iloc[0]
 
-    with st.spinner("載入 FanGraphs 打擊/投手資料..."):
-        batting = fetch_fangraphs_batting(int(season))
-        pitching = fetch_fangraphs_pitching(int(season))
+    probable: dict[str, str] = {}
+    try:
+        probable = probable_pitchers(int(away_row["id"]), int(home_row["id"]), game_date)
+    except Exception as exc:
+        st.warning(f"暫時抓不到 probable pitchers，仍可用球隊 ERA 模擬：{exc}")
 
-    probable = probable_pitchers(int(away_row["id"]), int(home_row["id"]), game_date)
+    away_probable = probable.get(str(away_row["id"]), "")
+    home_probable = probable.get(str(home_row["id"]), "")
     if probable:
         st.caption(
-            "statsapi probable pitchers："
-            f"{away_name} {probable.get(str(away_row['id']), 'N/A')}，"
-            f"{home_name} {probable.get(str(home_row['id']), 'N/A')}"
+            "MLB 官方 probable pitchers："
+            f"{zh_name(str(away_row['name']), MLB_TEAM_ZH)} {away_probable or 'N/A'}，"
+            f"{zh_name(str(home_row['name']), MLB_TEAM_ZH)} {home_probable or 'N/A'}"
         )
 
-    away_pitcher = select_pitcher(
-        f"{away_name} 先發投手",
-        pitching,
-        fg_team_abbr(away_row),
-        probable.get(str(away_row["id"]), ""),
+    away_pitcher_choice = st.selectbox(
+        f"{zh_name(str(away_row['name']), MLB_TEAM_ZH)} 先發投手",
+        pitcher_choice_options(away_probable),
+        key="mlb_away_pitcher",
     )
-    home_pitcher = select_pitcher(
-        f"{home_name} 先發投手",
-        pitching,
-        fg_team_abbr(home_row),
-        probable.get(str(home_row["id"]), ""),
+    home_pitcher_choice = st.selectbox(
+        f"{zh_name(str(home_row['name']), MLB_TEAM_ZH)} 先發投手",
+        pitcher_choice_options(home_probable),
+        key="mlb_home_pitcher",
     )
 
-    league_runs = fetch_mlb_league_runs_per_team_game(int(season))
-    st.caption(f"statsapi 估算本季聯盟平均每隊每場得分：{league_runs:.2f}")
+    use_fangraphs = st.checkbox(
+        "嘗試 FanGraphs/pybaseball 取得 xFIP（若被 403 擋下，會自動改用 MLB 官方 OPS/ERA）",
+        value=False,
+    )
+
     if st.button("執行 MLB 10,000 次模擬", type="primary", use_container_width=True):
         if int(away_row["id"]) == int(home_row["id"]):
             st.error("請選擇兩支不同球隊。")
             return
-        with st.spinner("參數化投手壓制力與打線火力，執行泊松 9 局模擬..."):
+        with st.spinner("抓取 MLB 官方 OPS/ERA，參數化投手壓制力與打線火力..."):
+            team_refs = tuple((int(row["id"]), fg_team_abbr(row)) for _, row in teams.iterrows())
+            batting, pitching = fetch_mlb_official_team_stats(int(season), team_refs)
+            league_runs = fetch_mlb_league_runs_per_team_game(int(season))
+            data_source_note = "資料源：MLB 官方 Stats API OPS / 團隊 ERA"
+
+            if use_fangraphs:
+                try:
+                    fangraphs_batting = fetch_fangraphs_batting(int(season))
+                    fangraphs_pitching = fetch_fangraphs_pitching(int(season))
+                    if not fangraphs_batting.empty and not fangraphs_pitching.empty:
+                        batting = fangraphs_batting
+                        pitching = fangraphs_pitching
+                        away_pitcher_choice = "(使用球隊 ERA)"
+                        home_pitcher_choice = "(使用球隊 ERA)"
+                        data_source_note = "資料源：FanGraphs/pybaseball OPS + ERA/xFIP"
+                except Exception as exc:
+                    st.warning(f"FanGraphs/pybaseball 無法使用，已改用 MLB 官方資料：{exc}")
+
+            away_pitcher = official_pitcher_row(pitching, fg_team_abbr(away_row), away_pitcher_choice)
+            home_pitcher = official_pitcher_row(pitching, fg_team_abbr(home_row), home_pitcher_choice)
             away = make_mlb_profile(away_row, batting, away_pitcher, league_runs)
             home = make_mlb_profile(home_row, batting, home_pitcher, league_runs)
             results = simulate_mlb(away, home)
@@ -509,9 +782,11 @@ def render_mlb() -> None:
                 f"{away.team_name} OPS {away.team_ops:.3f}，SP {away.pitcher_name} ERA {away.pitcher_era:.2f}"
                 f"{'' if away.pitcher_xfip is None else f' / xFIP/FIP {away.pitcher_xfip:.2f}'}；"
                 f"{home.team_name} OPS {home.team_ops:.3f}，SP {home.pitcher_name} ERA {home.pitcher_era:.2f}"
-                f"{'' if home.pitcher_xfip is None else f' / xFIP/FIP {home.pitcher_xfip:.2f}'}"
+                f"{'' if home.pitcher_xfip is None else f' / xFIP/FIP {home.pitcher_xfip:.2f}'}。"
+                f"{data_source_note}，本季聯盟平均每隊每場得分 {league_runs:.2f}"
             ),
         }
+        st.rerun()
 
 def main() -> None:
     st.set_page_config(
