@@ -1,0 +1,10 @@
+streamlit>=1.37
+pandas>=2.2
+numpy>=1.26
+plotly>=5.22
+nba_api>=1.6
+MLB-StatsAPI>=1.8
+pybaseball>=2.2
+lxml>=5.2
+beautifulsoup4>=4.12
+requests>=2.32
